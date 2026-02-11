@@ -1,178 +1,122 @@
-import { Action, ActionPanel, Icon, List, getPreferenceValues, Keyboard } from "@raycast/api";
-import { useState, useCallback } from "react";
-import { Crate, getCrates } from "./api";
-import Symbols from "./symbols";
+import { useState } from "react";
+import { useFetch } from "@raycast/utils";
+import { Action, ActionPanel, Detail, Icon, List } from "@raycast/api";
 
-enum CrateActions {
-  COPY_TO_CLIPBOARD = "copyToClipboard",
-  VIEW_ON_CRATES_IO = "viewOnCratesIo",
-  OPEN_CRATE_DOCUMENTATION = "openCrateDocumentation",
-  OPEN_HOMEPAGE = "openHomepage",
-  OPEN_REPOSITORY = "openRepository",
-  VIEW_SYMBOLS = "viewSymbols",
+interface CrateSearch {
+  id: string;
+  name: string;
+  default_version: string;
+  description?: string;
+  homepage?: string;
 }
 
-interface Preferences {
-  defaultOpenAction: CrateActions;
+interface MetaSearch {
+  total: number;
+  next_page?: string;
+  prev_page?: string;
 }
 
-function getShortcut(action: CrateActions, defaultAction: CrateActions): Keyboard.Shortcut | undefined {
-  if (action === defaultAction) {
-    return;
-  }
-  switch (action) {
-    case CrateActions.COPY_TO_CLIPBOARD:
-      return { modifiers: ["cmd"], key: "c" };
-    case CrateActions.VIEW_ON_CRATES_IO:
-      return { modifiers: ["cmd"], key: "o" };
-    case CrateActions.OPEN_CRATE_DOCUMENTATION:
-      return { modifiers: ["cmd"], key: "d" };
-    case CrateActions.OPEN_HOMEPAGE:
-      return { modifiers: ["cmd"], key: "h" };
-    case CrateActions.OPEN_REPOSITORY:
-      return { modifiers: ["cmd"], key: "r" };
-    case CrateActions.VIEW_SYMBOLS:
-      return { modifiers: ["cmd"], key: "i" };
-  }
+interface CratesSearchResponse {
+  crates: CrateSearch[];
+  meta: MetaSearch;
 }
 
-export default function Command() {
-  const [crates, setCrates] = useState<Crate[]>([]);
-  const [loading, setLoading] = useState(false);
+const CRATES_IO_BASE = "https://crates.io/api/v1";
 
-  const { defaultOpenAction }: Preferences = getPreferenceValues();
+export default function SearchList() {
+  const [searchText, setSearchText] = useState("");
 
-  const getActions = useCallback(
-    (
-      name: string,
-      version: string,
-      crate: Crate,
-      documentationURL?: string,
-      homepageURL?: string,
-      repositoryURL?: string,
-    ) => {
-      return [
-        {
-          actionName: CrateActions.COPY_TO_CLIPBOARD,
-          action: (
-            <Action.CopyToClipboard
-              key={CrateActions.COPY_TO_CLIPBOARD}
-              content={`${name} = "${version}"`}
-              title="Copy Dependency Line"
-              shortcut={getShortcut(CrateActions.COPY_TO_CLIPBOARD, defaultOpenAction)}
-            />
-          ),
-        },
-        {
-          actionName: CrateActions.VIEW_ON_CRATES_IO,
-          action: (
-            <Action.OpenInBrowser
-              key={CrateActions.VIEW_ON_CRATES_IO}
-              url={`https://crates.io/crates/${name}`}
-              title="View on crates.io"
-              shortcut={getShortcut(CrateActions.VIEW_ON_CRATES_IO, defaultOpenAction)}
-            />
-          ),
-        },
-        {
-          actionName: CrateActions.OPEN_CRATE_DOCUMENTATION,
-          action: documentationURL && (
-            <Action.OpenInBrowser
-              key={CrateActions.OPEN_CRATE_DOCUMENTATION}
-              url={documentationURL}
-              title="Open Crate Documentation"
-              shortcut={getShortcut(CrateActions.OPEN_CRATE_DOCUMENTATION, defaultOpenAction)}
-            />
-          ),
-        },
-        {
-          actionName: CrateActions.OPEN_HOMEPAGE,
-          action: homepageURL && (
-            <Action.OpenInBrowser
-              key={CrateActions.OPEN_HOMEPAGE}
-              url={homepageURL}
-              title="Open Homepage"
-              shortcut={getShortcut(CrateActions.OPEN_HOMEPAGE, defaultOpenAction)}
-            />
-          ),
-        },
-        {
-          actionName: CrateActions.OPEN_REPOSITORY,
-          action: repositoryURL && (
-            <Action.OpenInBrowser
-              key={CrateActions.OPEN_REPOSITORY}
-              url={repositoryURL}
-              title="Open Repository"
-              shortcut={getShortcut(CrateActions.OPEN_REPOSITORY, defaultOpenAction)}
-            />
-          ),
-        },
-        {
-          actionName: CrateActions.VIEW_SYMBOLS,
-          action: (
-            <Action.Push
-              key={CrateActions.VIEW_SYMBOLS}
-              title="View Symbols"
-              target={<Symbols crate={crate} />}
-              shortcut={getShortcut(CrateActions.VIEW_SYMBOLS, defaultOpenAction)}
-              icon={Icon.Info}
-            />
-          ),
-        },
-      ]
-        .filter((item) => !!item.action)
-        .sort((a) => {
-          if (a.actionName === defaultOpenAction) {
-            return -1;
-          }
-          return 0;
-        })
-        .map((item) => item.action);
+  const { isLoading, data } = useFetch<CratesSearchResponse>(`${CRATES_IO_BASE}/crates?q=${searchText}`, {
+    headers: {
+      // crates.io require User-Agent in API request
+      "User-Agent": "crates.io Raycast Extension",
     },
-    [defaultOpenAction],
-  );
+  });
 
-  async function search(v: string): Promise<void> {
-    setLoading(true);
-    setCrates(await getCrates(v));
-    setLoading(false);
-  }
-
-  function formatDownloads(downloads: number): string {
-    if (downloads >= 1000000) return `${(downloads / 1000000).toFixed(1)}m`;
-    if (downloads >= 1000) return `${(downloads / 1000).toFixed(1)}k`;
-    return downloads.toLocaleString();
-  }
+  const hasSearchText = searchText.trim().length > 0;
+  const hasResult = (data?.crates.length ?? 0) > 0;
 
   return (
-    <List isLoading={loading} onSearchTextChange={search} searchBarPlaceholder="Search for a crate..." throttle>
-      {crates.map((crate) => {
-        const { id, name, version, downloads, documentationURL, homepageURL, repositoryURL, description } = crate;
-        const actions = (
-          <ActionPanel>{getActions(name, version, crate, documentationURL, homepageURL, repositoryURL)}</ActionPanel>
-        );
+    <List
+      isLoading={isLoading}
+      searchText={searchText}
+      onSearchTextChange={setSearchText}
+      throttle
+      searchBarPlaceholder="Search on crates.io"
+    >
+      {!hasSearchText && <List.EmptyView title="Type something to get started" />}
 
-        return (
-          <List.Item
-            id={id}
-            key={id}
-            icon={"icon.png"}
-            title={name}
-            subtitle={description}
-            accessories={[
-              {
-                text: `v${version}`,
-              },
-              {
-                icon: Icon.Download,
-                text: formatDownloads(downloads),
-                tooltip: `${downloads.toLocaleString()} downloads`,
-              },
-            ]}
-            actions={actions}
-          />
-        );
-      })}
+      {hasResult &&
+        data?.crates.map((crate) => {
+          return (
+            <List.Item
+              icon={{
+                source: {
+                  light: "https://cdn.simpleicons.org/docsdotrs/000",
+                  dark: "https://cdn.simpleicons.org/docsdotrs/fff",
+                },
+              }}
+              key={crate.id}
+              title={crate.name}
+              subtitle={crate.description ?? ""}
+              accessories={[{ text: crate.default_version, icon: Icon.Tag }]}
+              actions={
+                <ActionPanel>
+                  <Action.Push title="See Detail" target={<DetailPage crateId={crate.id} />} />
+                </ActionPanel>
+              }
+            />
+          );
+        })}
     </List>
+  );
+}
+
+interface CrateDetail {
+  id: string;
+  name: string;
+  version: string[];
+  keywords: string[];
+  categories: string[];
+  default_version: string;
+}
+
+interface CrateDetailResponse {
+  crate: CrateDetail;
+}
+
+function DetailPage(props: { crateId: string }) {
+  const { data: crateData } = useFetch<CrateDetailResponse>(`${CRATES_IO_BASE}/crates/${props.crateId}`, {
+    headers: {
+      "User-Agent": "crates.io Raycast Extension",
+    },
+  });
+
+  const { isLoading: isReadmeLoading, data: ReadmeData } = useFetch<string>(
+    `${CRATES_IO_BASE}/crates/${props.crateId}/${crateData?.crate.default_version}/readme`,
+    {
+      headers: {
+        "User-Agent": "crates.io Raycast Extension",
+      },
+    },
+  );
+
+  return (
+    <Detail
+      isLoading={isReadmeLoading}
+      markdown={ReadmeData}
+      metadata={
+        <Detail.Metadata>
+          <Detail.Metadata.Label title="Author"></Detail.Metadata.Label>
+        <Detail.Metadata.TagList title="Tags">
+          {
+            crateData?.crate.keywords.map((keyword) => (
+              <Detail.Metadata.TagList.Item key={keyword} text={keyword}/>
+            ))
+          }
+        </Detail.Metadata.TagList>
+        </Detail.Metadata>
+      }
+    ></Detail>
   );
 }
